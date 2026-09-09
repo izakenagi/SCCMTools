@@ -327,11 +327,6 @@ Contributions are welcome! Please:
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 👤 Author
-
-**Yza**
-- GitHub: [@izakenagi](https://github.com/izakenagi)
-- Email: izakenagi@gmail.com
 
 ## 🙏 Acknowledgments
 
@@ -340,17 +335,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - CMTrace original developers
 - Infrastructure Tools contributors
 
-## 📞 Support
-
-For issues, feature requests, or questions:
-
-1. Check [GitHub Issues](https://github.com/izakenagi/SCCMTools/issues)
-2. Review documentation and README
-3. Submit detailed issue with:
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Environment details (Windows version, Python version, SCCM version)
-   - Screenshots if applicable
 
 ## 🔗 Links
 
