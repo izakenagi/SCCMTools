@@ -1,0 +1,206 @@
+name: Build & Publish
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".editorconfig"
+      - ".env.example"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".editorconfig"
+      - ".env.example"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  # Opt into Node.js 24 ahead of the 2026-06-16 default flip so the bundled
+  # JavaScript actions (actions/checkout, docker/*-action, etc.) stop emitting
+  # the Node 20 deprecation warning. See:
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase image name
+        id: img
+        run: echo "name=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.img.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=CMTrace.Dev.Docker
+            org.opencontainers.image.description=Self-hosted, offline-capable mirror of CMTrace.dev — a browser-based log viewer for ConfigMgr, SCCM and Intune.
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+            org.opencontainers.image.url=https://cmtrace.dev/
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: ${{ github.event_name != 'pull_request' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
+
+  build-binaries:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64, ext: .exe }
+          - { goos: windows, goarch: arm64, ext: .exe }
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Embed Windows icon + version info
+        if: matrix.goos == 'windows'
+        env:
+          TARGET_GOARCH: ${{ matrix.goarch }}
+        run: |
+          # rsrc is a host-side helper that emits a .syso the Go linker
+          # consumes during the subsequent cross-build. It must therefore
+          # be installed for the *runner* (linux/amd64), not the Windows
+          # target arch, otherwise `go install` produces an unrunnable
+          # binary under $GOPATH/bin/<goos>_<goarch>/. Force GOOS/GOARCH
+          # to the host for the install only.
+          GOOS=linux GOARCH=amd64 go install github.com/akavel/rsrc@v0.10.2
+          "$(go env GOPATH)/bin/rsrc" \
+            -arch "${TARGET_GOARCH}" \
+            -ico resources/icons/cmtrace.ico \
+            -o "rsrc_windows_${TARGET_GOARCH}.syso"
+
+      - name: Build standalone binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          version="${GITHUB_REF_NAME}"
+          commit="${GITHUB_SHA}"
+          out="dist/cmtrace-${version}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${version} -X main.commit=${commit}" \
+            -o "$out" .
+          (cd dist && sha256sum "$(basename "$out")" > "$(basename "$out").sha256")
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmtrace-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          retention-days: 7
+          if-no-files-found: error
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-push, build-binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # Only the cross-compiled binaries — exclude the auto-uploaded
+          # *.dockerbuild buildkit metadata artifact from build-and-push,
+          # which periodically times out on the Azure blob backend and
+          # has no place in the release anyway.
+          pattern: cmtrace-*
+          path: dist
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -la dist/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
