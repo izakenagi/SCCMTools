@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Node.js dependencies (too large for git)
+node_modules/
+.next/
+dist/
+build/
+
+# Project specific
+*.log
+*.json.bak
+settings.json.bak
+profiles.json.bak
+.env
+.env.local
+
+# Large binary files
+*.node
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Cache
+.eslintcache
+.cache/
+.parcel-cache/
+.next/cache/
