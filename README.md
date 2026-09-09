@@ -360,5 +360,3 @@ For issues, feature requests, or questions:
 - **Tkinter Tutorial**: https://docs.python.org/3/library/tkinter.html
 
 ---
-
-**Made with ❤️ for SCCM Administrators**
